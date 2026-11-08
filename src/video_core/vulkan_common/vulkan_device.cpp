@@ -603,7 +603,9 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     host_float16_supported = features.shader_float16_int8.shaderFloat16;
     if (is_nvidia) {
         const auto arch = GetNvidiaArch();
-        if (arch >= NvidiaArchitecture::Arch_AmpereOrNewer) {
+        // Test switch: EDEN_NX2_NVIDIA_FLOAT16=1 keeps float16 math on Ampere and newer.
+        const bool keep_float16 = std::getenv("EDEN_NX2_NVIDIA_FLOAT16") != nullptr;
+        if (arch >= NvidiaArchitecture::Arch_AmpereOrNewer && !keep_float16) {
             LOG_WARNING(Render_Vulkan, "Ampere and newer have broken float16 math");
             features.shader_float16_int8.shaderFloat16 = false;
         }
