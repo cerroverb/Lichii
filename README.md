@@ -10,20 +10,18 @@
   <img src="dist/branding/lichii_icon_with_logo.png" alt="Lichii" width="600">
 </p>
 
-Lichii with fixes for The Duskbloods network test on Linux: boot, online checks, shaders, fog, an upscale in place of the game's DLSS network, and audio. Tested on an RTX 5080 laptop and a Steam Deck.
+This fork of [Lichii](https://github.com/zortos293/Lichii) adds fixes for The Duskbloods network test on Linux. The `nvidia-dusk` branch has all of them; each one is also sent to Lichii on its own:
 
-What you need:
-- the AppImage from [Releases](https://github.com/cerroverb/Lichii/releases)
-- your own `prod.keys` and Switch 2 firmware, installed in the emulator
-- your own dump of the network test (the `.nup` or the extracted folder)
-- the [playDB-CNT](https://github.com/sikoGD/playDB-CNT/releases) launcher (1.1.0 or later), which runs the local servers the game checks and then starts the emulator
+- boot to the menus, and The Blood-Drenched Moon crash (pool memory): [#552](https://github.com/zortos293/Lichii/pull/552)
+- online checks through a local server: [#560](https://github.com/zortos293/Lichii/pull/560), [#561](https://github.com/zortos293/Lichii/pull/561)
+- an upscale in place of the game's DLSS network: [#637](https://github.com/zortos293/Lichii/pull/637)
+- fog volumes cleared slice by slice: [#638](https://github.com/zortos293/Lichii/pull/638)
+- audio crackle, shader forms, audio after a pause, the colour grading table copy: branches `fix/sysmix-host-callback-queue`, `fix/duskbloods-shader-forms`, `fix/sysmix-pump-after-pause`, `fix/blit-volume-slices`
 
-Setup:
-1. `chmod +x Lichii-Duskbloods-x86_64.AppImage` and put it in `~/Applications`.
-2. Unpack playDB-CNT and run `./play-duskbloods.sh`.
-3. Pick the AppImage and the game in the launcher, then start.
-4. Press B to enter the game; press Start twice to skip the intro video.
+To play, take the AppImage from [Releases](https://github.com/cerroverb/Lichii/releases) and start it through the [playDB-CNT](https://github.com/sikoGD/playDB-CNT/releases) launcher (1.1.0 or later), which runs the local servers the game checks. Keys, firmware and your game dump are set up as for Lichii.
 
-Known issues: reflections flicker, shading fades in after the camera stops, and the fog lighting can flash in Battle Remembrances.
-
-Source for each release is under its tag; fixes go upstream to [Lichii](https://github.com/zortos293/Lichii) as pull requests. Licensed GPL-3.0-or-later, see [LICENSE.txt](LICENSE.txt).
+Known issues:
+- In Battle Remembrances the whole picture brightens and darkens every fraction of a second after a phase starts (seen on NVIDIA; not on a Steam Deck).
+- The upscale stands in for DLSS, which the game expects: reflections flicker, shading fades back in after the camera stops, and fine detail shimmers on idle characters.
+- Remembrances run well below full speed on some machines.
+- If the emulator crashes while the game is saving, the save can be damaged; keep a copy of your save.
