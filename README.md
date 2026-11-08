@@ -10,7 +10,7 @@
   <img src="dist/branding/lichii_icon_with_logo.png" alt="Lichii" width="600">
 </p>
 
-This fork of [Lichii](https://github.com/zortos293/Lichii) adds fixes for The Duskbloods network test on Linux. The `nvidia-dusk` branch has all of them; each one is also sent to Lichii on its own:
+This fork of [Lichii](https://github.com/zortos293/Lichii) adds fixes for The Duskbloods network test on Linux. The `lichii-dusk` branch has all of them; each one is also sent to Lichii on its own:
 
 - boot to the menus, and The Blood-Drenched Moon crash (pool memory): [#552](https://github.com/zortos293/Lichii/pull/552)
 - online checks through a local server: [#560](https://github.com/zortos293/Lichii/pull/560), [#561](https://github.com/zortos293/Lichii/pull/561)
