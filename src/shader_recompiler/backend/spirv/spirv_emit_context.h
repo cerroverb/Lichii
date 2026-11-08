@@ -370,6 +370,9 @@ public:
     Id frag_depth{};
 
     std::array<Id, 2> software_matrix_functions{};
+    /// The software matrix functions round to fp16 with a native conversion, which needs the
+    /// entry point's fp16 round-to-nearest-even and denorm preserve modes.
+    bool native_half_rounding{};
     std::vector<Id> interfaces;
     std::vector<std::pair<u32, spv::Op>> opcode_rewrites;
 
