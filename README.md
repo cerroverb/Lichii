@@ -26,4 +26,4 @@ Setup:
 
 Known issues: reflections flicker, shading fades in after the camera stops, and the fog lighting can flash in Battle Remembrances.
 
-Source for each release is under its tag; fixes go upstream to [Lichii](https://github.com/zortos293/Lichii) as pull requests. Most fixes in this fork were written with LLM assistance. Licensed GPL-3.0-or-later, see [LICENSE.txt](LICENSE.txt).
+Source for each release is under its tag; fixes go upstream to [Lichii](https://github.com/zortos293/Lichii) as pull requests. Licensed GPL-3.0-or-later, see [LICENSE.txt](LICENSE.txt).
