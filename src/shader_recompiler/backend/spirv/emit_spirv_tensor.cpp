@@ -55,7 +55,12 @@ void DefineSoftwareMatrixFunctions(EmitContext& ctx, const IR::Program& program)
         const auto unpack = [&](Id v) { return ctx.OpUnpackHalf2x16(ctx.F32[2], v); };
         const auto round_half = [&](Id value) {
             if (ctx.native_half_rounding) {
-                return ctx.OpFConvert(f32ty, ctx.OpFConvert(f16ty, value));
+                // Without NoContraction, RADV folds the conversion pair away and nothing rounds.
+                const Id half = ctx.OpFConvert(f16ty, value);
+                ctx.Decorate(half, spv::Decoration::NoContraction);
+                const Id widened = ctx.OpFConvert(f32ty, half);
+                ctx.Decorate(widened, spv::Decoration::NoContraction);
+                return widened;
             }
             // Do not express the intermediate rounding as unpack(pack(value)): drivers may
             // eliminate that round trip. Round normal significands explicitly, ties to even;
