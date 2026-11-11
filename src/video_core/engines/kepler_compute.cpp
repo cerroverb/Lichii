@@ -1175,7 +1175,7 @@ bool KeplerCompute::ScaleDlssRenderRegion(GPUVAddr constants,
     const bool done = rasterizer->AccelerateTemporalUpscale(
         surface(*input), surface(*output), motion_surface,
         use_history && depth ? &*depth : nullptr,
-        use_history ? jitter->offset : std::array{0.0f, 0.0f}, motion_scale, use_history,
+        jitter ? jitter->offset : std::array{0.0f, 0.0f}, motion_scale, use_history,
         std::array{width, height});
     static u32 last_width{};
     if (width != last_width) {
