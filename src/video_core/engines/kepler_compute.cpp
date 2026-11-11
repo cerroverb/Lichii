@@ -1158,19 +1158,25 @@ bool KeplerCompute::ScaleDlssRenderRegion(GPUVAddr constants,
         result.addr_lower = static_cast<u32>(tic.Address());
         return result;
     };
-    if (!jitter || !motion || width > motion->Width() || height > motion->Height() ||
-        (depth && (width > depth->Width() || height > depth->Height()))) {
-        return false;
+    // Without this evaluation's jitter or usable motion vectors (a rejected pass clears them), the
+    // region is still scaled, without history, rather than leaving the network's output.
+    const bool use_history = jitter && motion && width <= motion->Width() &&
+                             height <= motion->Height() &&
+                             (!depth || (width <= depth->Width() && height <= depth->Height()));
+    Fermi2D::Surface motion_surface{};
+    if (use_history) {
+        motion_surface = surface(*motion);
+        motion_surface.format = Tegra::RenderTargetFormat::R16G16_FLOAT;
     }
-    Fermi2D::Surface motion_surface = surface(*motion);
-    motion_surface.format = Tegra::RenderTargetFormat::R16G16_FLOAT;
     // The game's motion vectors point from the previous position to the current one (a rightward
     // pan gives negative x while the scene moves left), the reverse of what the upscale expects.
-    constexpr std::array<f32, 2> motion_scale{-1.0f, -1.0f};
-    constexpr bool use_history = true;
+    const std::array<f32, 2> motion_scale =
+        use_history ? std::array{-1.0f, -1.0f} : std::array{0.0f, 0.0f};
     const bool done = rasterizer->AccelerateTemporalUpscale(
-        surface(*input), surface(*output), motion_surface, depth ? &*depth : nullptr,
-        jitter->offset, motion_scale, use_history, std::array{width, height});
+        surface(*input), surface(*output), motion_surface,
+        use_history && depth ? &*depth : nullptr,
+        use_history ? jitter->offset : std::array{0.0f, 0.0f}, motion_scale, use_history,
+        std::array{width, height});
     static u32 last_width{};
     if (width != last_width) {
         last_width = width;
@@ -1193,7 +1199,7 @@ bool KeplerCompute::TryFireEmblemUpscale(bool allow_history) {
     const auto jitter = fe_upscale_jitter.Take();
     const auto motion = std::exchange(dlss_motion_vectors, std::nullopt);
     const auto depth = std::exchange(dlss_depth, std::nullopt);
-    if (!jitter || (use_history && (!motion || !depth))) {
+    if (!dlss_chain.render_region && (!jitter || (use_history && (!motion || !depth)))) {
         static std::array<bool, 2> reported{};
         if (!reported[game_index]) {
             reported[game_index] = true;
