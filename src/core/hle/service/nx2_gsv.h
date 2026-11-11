@@ -667,10 +667,11 @@ private:
                              start, last, *address, m_gpu_only_bytes >> 20, m_gpu_only_peak >> 20);
                 } else {
                     if (back_whole && KeepsConstantsInGpuOnlyRegions()) {
-                        // Both pools are exhausted: the title's CPU-written constants here are lost.
-                        LOG_ERROR(Service, "nx2:gpu 214 GPU-only region [{:#x}, {:#x}] could not be "
-                                           "backed; CPU writes to it are lost",
-                                  start, last);
+                        // This title writes constants into some of its GPU-only regions from the
+                        // CPU; if this is one of them, those writes read back as zero.
+                        LOG_WARNING(Service, "nx2:gpu 214 GPU-only region [{:#x}, {:#x}] could not be "
+                                             "backed whole; CPU writes before a GPU write read zero",
+                                    start, last);
                     }
                     // The rest is written by the host GPU, not through guest memory (title 1's and
                     // title 4's render targets, 285-300 MB regions): like a sparse region it gets a
