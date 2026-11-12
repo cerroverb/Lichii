@@ -142,8 +142,8 @@ static GetAddrInfoError OnlineRedirectResolve(const OnlineRedirect::Config& conf
     }
     // The hints are not read, so both socket types are offered, as a normal lookup does.
     const auto ip = config.ip;
-    for (const auto [type, protocol] : {std::pair{Network::Type::STREAM, Network::Protocol::TCP},
-                                        std::pair{Network::Type::DGRAM, Network::Protocol::UDP}}) {
+    for (const auto& [type, protocol] : {std::pair{Network::Type::STREAM, Network::Protocol::TCP},
+                                         std::pair{Network::Type::DGRAM, Network::Protocol::UDP}}) {
         out.push_back(Network::AddrInfo{
             .family = Network::Domain::INET,
             .socket_type = type,

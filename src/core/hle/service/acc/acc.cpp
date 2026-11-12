@@ -34,6 +34,10 @@
 #include "core/hle/service/server_manager.h"
 #include "core/loader/loader.h"
 
+#ifdef _WIN32
+#undef CreateEvent // From windows.h, which the network headers include
+#endif
+
 namespace Service::Account {
 
 // The ID token games forward to their online server at login. With a private server set, it
