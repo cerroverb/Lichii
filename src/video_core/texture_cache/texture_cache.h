@@ -1313,28 +1313,39 @@ boost::container::small_vector<ImageId, 8> TextureCache<P>::NewerGpuOverlaps(
 
 template <class P>
 void TextureCache<P>::WriteBackImages(std::span<const ImageId> image_ids) {
-    // All downloads are recorded before the one GPU wait, then written in order. Their staging
-    // buffers are held until written: a submission in between frees a buffer by its tick, and a
-    // later download in the batch could take it over.
+    // The downloads are recorded in batches of up to 64 MiB of staging, each with one GPU wait,
+    // then written in order. Their staging buffers are held until written: a submission in
+    // between frees a buffer by its tick, and a later download in the batch could take it over.
+    constexpr size_t MaxBatchBytes = 64_MiB;
     struct Download {
         Image* image;
         decltype(runtime.DownloadStagingBuffer(0)) map;
         decltype(FullDownloadCopies(std::declval<const ImageInfo&>())) copies;
     };
     boost::container::small_vector<Download, 8> downloads;
+    size_t batch_bytes = 0;
+    const auto write_batch = [&] {
+        runtime.Finish();
+        for (Download& download : downloads) {
+            SwizzleImage(*gpu_memory, download.image->gpu_addr, download.image->info,
+                         download.copies, download.map.mapped_span, swizzle_data_buffer);
+            runtime.FreeDeferredStagingBuffer(download.map);
+        }
+        downloads.clear();
+        batch_bytes = 0;
+    };
     for (const ImageId image_id : image_ids) {
         Image& image = slot_images[image_id];
+        if (!downloads.empty() && batch_bytes + image.unswizzled_size_bytes > MaxBatchBytes) {
+            write_batch();
+        }
         auto map = runtime.DownloadStagingBuffer(image.unswizzled_size_bytes, true);
         auto copies = FullDownloadCopies(image.info);
         image.DownloadMemory(map, copies);
         downloads.push_back({&image, std::move(map), std::move(copies)});
+        batch_bytes += image.unswizzled_size_bytes;
     }
-    runtime.Finish();
-    for (Download& download : downloads) {
-        SwizzleImage(*gpu_memory, download.image->gpu_addr, download.image->info, download.copies,
-                     download.map.mapped_span, swizzle_data_buffer);
-        runtime.FreeDeferredStagingBuffer(download.map);
-    }
+    write_batch();
 }
 
 template <class P>
