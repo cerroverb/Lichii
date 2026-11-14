@@ -25,6 +25,7 @@
 #include "core/memory.h"
 #include "tests/core/system_test_context.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/buffer_cache/indirect_buffer.h"
 #include "video_core/buffer_cache/memory_tracker_base.h"
 #include "video_core/control/channel_state.h"
 #include "video_core/gpu.h"
@@ -63,6 +64,9 @@ struct Staging {
 struct Runtime {
     bool CanReportMemoryUsage() const {
         return false;
+    }
+    u64 GetBufferAllocationTail() const {
+        return 0;
     }
     u64 GetDeviceLocalMemory() const {
         return 0;
@@ -276,7 +280,8 @@ struct BufferCacheTestAccess {
         cache.memory_tracker.ForEachUploadRange(address, size, [](auto, auto) {});
         return id;
     }
-    static Buffer& Get(Cache& cache, BufferId id) {
+    template <class C>
+    static Buffer& Get(C& cache, BufferId id) {
         return cache.slot_buffers[id];
     }
     /// Add without the upload: guest memory not yet read into the buffer.
@@ -320,6 +325,10 @@ struct BufferCacheTestAccess {
     /// are uploaded.
     static void Upload(Cache& cache, BufferId id, DAddr address, u32 size) {
         (void)cache.SynchronizeBuffer(cache.slot_buffers[id], address, size);
+    }
+    /// GPU addresses resolve through `memory` (ObtainBuffer).
+    static void UseGpuMemory(Cache& cache, Tegra::MemoryManager& memory) {
+        cache.gpu_memory = &memory;
     }
     /// A guest write the buffer cache doesn't hear of, on a page the tracker counts as written.
     static void MarkCpuModified(Cache& cache, DAddr address, u64 size) {
@@ -1220,6 +1229,27 @@ TEST_CASE("Read downloads keep CPU writes made while they were on their way", "[
     REQUIRE_FALSE(Access::Pending(*f.cache, 0x20000, 0x1000));
 }
 
+TEST_CASE("Indirect dispatch arguments remain GPU modified across a neighboring CPU upload",
+          "[buffer_ports]") {
+    Fixture f;
+    const auto id = Access::Add(*f.cache, 0x10000, 0x10000);
+    auto &original = Access::Get(*f.cache, id);
+    std::fill_n(original.bytes.begin() + 0x40, 12, u8{0x73});
+    Access::Dirty(*f.cache, 0x10040, 12);
+    Access::UseGpuMemory(*f.cache, *f.memory);
+    const auto [arguments, offset] = VideoCommon::ObtainIndirectBuffer(*f.cache, 0x100040);
+    REQUIRE(Access::Pending(*f.cache, 0x10040, 12));
+    REQUIRE(arguments->bytes[offset] == 0x73);
+    // A CPU write elsewhere on this tracked page must not re-upload the stale argument bytes.
+    f.bytes[0x80] = 0x42;
+    Access::MarkCpuModified(*f.cache, 0x10000, 0x1000);
+    Access::Upload(*f.cache, id, 0x10000, 0x1000);
+    REQUIRE(arguments->bytes[offset] == 0x73);
+    REQUIRE(arguments->bytes[arguments->Offset(0x10080)] == 0x42);
+    f.cache->DownloadMemory(0x10040, 12);
+    REQUIRE(f.bytes[0x40] == 0x73);
+}
+
 TEST_CASE("Newer bytes that guest memory doesn't hold yet land the read downloads under them first",
           "[buffer_ports]") {
     Fixture f;
@@ -1230,7 +1260,7 @@ TEST_CASE("Newer bytes that guest memory doesn't hold yet land the read download
     auto& counters = VideoCore::AsyncReadback::g_counters;
     const u64 landings = counters.clear_landings.load();
     const u64 waits = counters.clear_waits.load();
-    SECTION("an indirect dispatch's arguments, written by the GPU and discarded") {
+    SECTION("an overwritten range discards its old GPU contents") {
         (void)f.cache->ObtainCPUBuffer(0x20040, 12,
                                        VideoCommon::ObtainBufferSynchronize::FullSynchronize,
                                        VideoCommon::ObtainBufferOperation::DiscardWrite);
@@ -2529,4 +2559,93 @@ TEST_CASE("Claimed CPU writes keep their bytes when an earlier one downloads the
     REQUIRE(f.bytes[0x10800] == 0xbb);
     REQUIRE(f.bytes[0x1080f] == 0xbb);
     REQUIRE(f.bytes[0x10810] == 0x12);
+}
+
+namespace {
+/// Command list page 0x18000 (GPU 0x108000) of KeepFixture's buffer, read from its copies as the
+/// split's front reads them (DmaPusher::ReadGpuWrittenCommands).
+struct ListPageFixture : KeepFixture {
+    static constexpr DAddr Page = 0x18000;
+    static constexpr GPUVAddr PageGpu = 0x108000;
+
+    ListPageFixture() : KeepFixture{nullptr} {
+        Draw(nullptr); // Binds the channel DMACopy and DMAClear use.
+        Tegra::Nx2MarkCommandListPage(Page);
+    }
+    /// Collects the page writes of a dispatch or DMA operation and has the host GPU make the
+    /// copies taken after it, as the rasterizer does.
+    template <typename Func>
+    void Work(Func&& func) {
+        cache->Nx2CollectListCopies(true);
+        func();
+        if (cache->Nx2CopyListPages(runtime.CurrentTick())) {
+            runtime.Complete(runtime.SubmitForHostRead());
+        }
+        cache->Nx2CollectListCopies(false);
+    }
+    /// A dispatch that writes `value` over [address, address + size).
+    void Dispatch(DAddr address, u32 size, u8 value) {
+        Work([&] {
+            auto& buffer = Access::Get(*cache, id);
+            runtime.pending.push_back([&buffer, address, size, value] {
+                std::fill_n(buffer.bytes.begin() + static_cast<std::ptrdiff_t>(address - 0x10000),
+                            size, value);
+            });
+            Access::GpuWrite(*cache, id, address, size);
+        });
+    }
+    /// Whether the front reads [address, address + 0x20) from a copy that holds `value`.
+    bool CopyHolds(DAddr address, u8 value) {
+        std::array<u8, 0x20> out{};
+        if (cache->Nx2ReadListCopy(address, out, true) != KeepCache::Nx2ListRead::Copied) {
+            return false;
+        }
+        return std::ranges::all_of(out, [value](u8 byte) { return byte == value; });
+    }
+
+    const Nx2TitleScope nx2_title;
+};
+} // namespace
+
+TEST_CASE("A command list page is copied again after a DMA copy of data no GPU work wrote",
+          "[buffer_ports]") {
+    ListPageFixture f;
+    f.Dispatch(ListPageFixture::Page, 0x20, 3);
+    REQUIRE(f.CopyHolds(ListPageFixture::Page, 3));
+
+    // The source holds only what the CPU wrote, so none of the copied bytes are GPU-modified.
+    std::memset(f.bytes + 0x4000, 7, 0x20);
+    f.cache->WriteMemory(0x14000, 0x20);
+    f.Work([&] { REQUIRE(f.cache->DMACopy(0x104000, ListPageFixture::PageGpu, 0x20)); });
+    REQUIRE(f.bytes[0x8000] == 7);
+    REQUIRE(f.CopyHolds(ListPageFixture::Page, 7));
+}
+
+TEST_CASE("A command list page is copied again after a DMA clear", "[buffer_ports]") {
+    ListPageFixture f;
+    f.Dispatch(ListPageFixture::Page, 0x20, 3);
+    REQUIRE(f.CopyHolds(ListPageFixture::Page, 3));
+
+    // MaxwellDMA writes guest memory once the cache cleared the buffer.
+    f.Work([&] { REQUIRE(f.cache->DMAClear(ListPageFixture::PageGpu, 8, 0x09090909)); });
+    std::memset(f.bytes + 0x8000, 9, 0x20);
+    REQUIRE(f.CopyHolds(ListPageFixture::Page, 9));
+}
+
+TEST_CASE("A command list page's copy holds the CPU's bytes the buffer had not taken yet",
+          "[buffer_ports]") {
+    ListPageFixture f;
+    f.Dispatch(ListPageFixture::Page, 0x20, 3);
+    f.cache->DownloadMemory(ListPageFixture::Page, 0x1000);
+    REQUIRE(f.bytes[0x8000] == 3);
+
+    // Later CPU writes to the page reach no cache: only the first is reported.
+    std::memset(f.bytes + 0x8100, 5, 0x20);
+    f.cache->WriteMemory(ListPageFixture::Page + 0x100, 0x20);
+    REQUIRE_FALSE(f.CopyHolds(ListPageFixture::Page, 3));
+
+    f.Work([&] { REQUIRE(f.cache->DMAClear(ListPageFixture::PageGpu, 8, 0x09090909)); });
+    std::memset(f.bytes + 0x8000, 9, 0x20);
+    REQUIRE(f.CopyHolds(ListPageFixture::Page, 9));
+    REQUIRE(f.CopyHolds(ListPageFixture::Page + 0x100, 5));
 }

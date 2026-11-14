@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: 2022 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <atomic>
@@ -60,6 +59,7 @@ void OnBack(const Func& func) {
     if (auto& split = VideoCommon::GpuSplit::Get(); split.Active()) {
         split.Defer(func);
     } else {
+        VideoCommon::Nx2FastDraw::BreakUnsplit(VideoCommon::Nx2FastDraw::Reason::Call);
         func();
     }
 }
@@ -183,6 +183,10 @@ void VerifyWithoutDrain(DmaPusher& dma_pusher, const Puller::PendingAcquire& acq
 }
 
 } // Anonymous namespace
+
+Puller::~Puller() {
+    Nx2SemaphoreWaiters::Get().Remove(this);
+}
 
 bool Puller::PendingAcquire::Matches(u32 current) const {
     switch (static_cast<GpuSemaphoreOperation>(operation)) {
