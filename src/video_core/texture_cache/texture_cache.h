@@ -180,17 +180,17 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
             return false;
         }
         if (must_download) {
-            WriteBackImage(image);
             // An image that overlaps others badly shares memory with them. Dropped without a
             // write-back, the next image made over that memory loads whatever an older image left
             // there: The Duskbloods' HUD layer came back as its character portraits. The overlaps
             // drawn after it are written back again over it, oldest first, so each part of the
             // memory ends with its newest data.
+            boost::container::small_vector<ImageId, 8> write_back{image_id};
             if (True(image.flags & ImageFlagBits::BadOverlap)) {
-                for (const ImageId overlap_id : NewerGpuOverlaps(image)) {
-                    WriteBackImage(slot_images[overlap_id]);
-                }
+                const auto newer = NewerGpuOverlaps(image);
+                write_back.insert(write_back.end(), newer.begin(), newer.end());
             }
+            WriteBackImages(write_back);
             ++gc_download_deletes;
             ClearStaleImage(image);
         } else {
@@ -1312,13 +1312,29 @@ boost::container::small_vector<ImageId, 8> TextureCache<P>::NewerGpuOverlaps(
 }
 
 template <class P>
-void TextureCache<P>::WriteBackImage(Image& image) {
-    auto map = runtime.DownloadStagingBuffer(image.unswizzled_size_bytes);
-    const auto copies = FullDownloadCopies(image.info);
-    image.DownloadMemory(map, copies);
+void TextureCache<P>::WriteBackImages(std::span<const ImageId> image_ids) {
+    // All downloads are recorded before the one GPU wait, then written in order. Their staging
+    // buffers are held until written: a submission in between frees a buffer by its tick, and a
+    // later download in the batch could take it over.
+    struct Download {
+        Image* image;
+        decltype(runtime.DownloadStagingBuffer(0)) map;
+        decltype(FullDownloadCopies(std::declval<const ImageInfo&>())) copies;
+    };
+    boost::container::small_vector<Download, 8> downloads;
+    for (const ImageId image_id : image_ids) {
+        Image& image = slot_images[image_id];
+        auto map = runtime.DownloadStagingBuffer(image.unswizzled_size_bytes, true);
+        auto copies = FullDownloadCopies(image.info);
+        image.DownloadMemory(map, copies);
+        downloads.push_back({&image, std::move(map), std::move(copies)});
+    }
     runtime.Finish();
-    SwizzleImage(*gpu_memory, image.gpu_addr, image.info, copies, map.mapped_span,
-                 swizzle_data_buffer);
+    for (Download& download : downloads) {
+        SwizzleImage(*gpu_memory, download.image->gpu_addr, download.image->info, download.copies,
+                     download.map.mapped_span, swizzle_data_buffer);
+        runtime.FreeDeferredStagingBuffer(download.map);
+    }
 }
 
 template <class P>

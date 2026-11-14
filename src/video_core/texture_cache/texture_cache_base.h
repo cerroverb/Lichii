@@ -504,8 +504,8 @@ private:
     [[nodiscard]] boost::container::small_vector<ImageId, 8> NewerGpuOverlaps(
         const ImageBase& image) const;
 
-    /// Copies a GPU-written image back to guest memory and waits for it.
-    void WriteBackImage(Image& image);
+    /// Copies images back to guest memory, in order, with one wait for the GPU.
+    void WriteBackImages(std::span<const ImageId> image_ids);
 
     void RefreshContents(Image& image, ImageId image_id);
 
