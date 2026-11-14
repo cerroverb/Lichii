@@ -700,7 +700,7 @@ void Scheduler::SetHangMarkers(VkBuffer buffer, std::span<const u32> values) {
     hang_marker_items.resize(HangMarkerItems);
     hang_marker_values = values;
     hang_marker_buffer = buffer;
-    LOG_INFO(Render_Vulkan, "Hang markers on: every draw and dispatch writes VK_AMD_buffer_marker");
+    LOG_INFO(Render_Vulkan, "Hang markers on: draws, indirect draws and dispatches write VK_AMD_buffer_marker");
 }
 
 void Scheduler::BeginHangMarker(vk::CommandBuffer cmdbuf, GpuWork kind, u64 hash,
